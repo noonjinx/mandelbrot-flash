@@ -1,0 +1,244 @@
+<?xml version="1.0"?>
+<!-- Simple Mandelbrot Explorer v1.0 by Jon Nixon based on    -->
+<!-- formulae at http://en.wikipedia.org/wiki/Mandelbrot_set  -->
+<s:Application xmlns:fx="http://ns.adobe.com/mxml/2009"
+               xmlns:s="library://ns.adobe.com/flex/spark"
+               xmlns:mx="library://ns.adobe.com/flex/mx">
+     <fx:Script>
+          <![CDATA[
+
+import flash.display.Bitmap;
+import flash.display.BitmapData;
+
+// Starting values
+public static const START_ITERATION_LIMIT:int = 300;
+public static const START_OX:Number = - 2.05;
+public static const START_OY:Number = - 1.0;
+public static const START_SCALE:Number = 1;
+
+// Limits to use entered data
+private static const ITERATIONS_MIN:int = 25;
+private static const ITERATIONS_MAX:int = 2000;
+private static const MILLIS_BETWEEN_CLICKS:Number = 100;
+
+// Global variables
+private var iterationLimit:int = START_ITERATION_LIMIT;
+private var ox:Number = START_OX;
+private var oy:Number = START_OY;
+private var scale:Number = START_SCALE;
+private var colours:Array = new Array(); 
+private var bitmapData:BitmapData;
+private var prevDate:Date = new Date();
+
+// Perform any initializations required at first startup
+private function start():void {
+    iterationLimit = START_ITERATION_LIMIT;
+    bitmapData = new BitmapData( canvas.width, canvas.height );
+    var bitmap:Bitmap = new Bitmap( bitmapData );
+    canvas.addChild( bitmap );
+    init( iterationLimit );
+}
+
+// When restarting, check user entered iterationLimit and then initialize
+private function restart():void {
+    iterationLimit = parseInt( iterationsField.text );
+    if ( iterationLimit < 25 ) iterationLimit = 25;
+    if ( iterationLimit > 2000 ) iterationLimit = 2000;
+    init( iterationLimit );
+}
+
+// Perform any initializations start and restart have in common
+private function init( iterationLimit:int ):void {
+    iterationsField.text = String( iterationLimit );
+    initColours( iterationLimit );
+    oy = START_OY;
+    ox = START_OX;
+    scale = START_SCALE;
+    rebuild();
+}
+
+// Create array of colours, one for each iteration
+private function initColours( iterationLimit:int ):void  {
+
+    // Divide iterations into 7 ranges
+    var range:int = ( iterationLimit / 7 + 1 );
+
+    // Loop through each iteration in a range
+    for ( var i:int = 0; i < range; i++ ) {
+
+        // Increase goes up from 00 to FF as range is completed
+        var increase:int = 256 * i / range;
+        if ( increase > 255 ) increase = 255;
+
+        // Decrease goes down from FF to 00 as range is completed
+        var decrease:int = 256 * ( range - i ) / range;
+        if ( decrease > 255 ) decrease = 255;
+
+        // First range moves from 000000 black to 0000FF blue
+        colours[i + 0 * range] = increase;
+
+        // Second range moves from 0000FF blue to 00FF00 green
+        colours[i + 1 * range] = 256 * increase + decrease;
+
+        // Third range moves from 00FF00 green to 00FFFF cyan
+        colours[i + 2 * range] = 255 * 256 + increase;
+
+        // Fourth range moves from 00FFFF cyan to FF0000 red
+        colours[i + 3 * range] = 256 * 256 * increase + 256 * decrease + decrease;
+
+        // Fifth range moves from FF0000 red to FF00FF magenta
+        colours[i + 4 * range] = 255 * 256 * 256 + increase;
+
+        // Sixth range moves from FF00FF magenta to FFFF00 yellow
+        colours[i + 5 * range] = 255 * 256 * 256 + 256 * increase + decrease;
+
+        // Seventh range moves from FFFF00 yellow to FFFFFF white
+        colours[i + 6 * range] = 255 * 256 * 256 + 255 * 256 + increase;
+    }
+}
+
+// Function to request rebuild -
+// Multiple requests will be ignored until rebuild finishes
+private function requestRebuild( e:MouseEvent, newX:Number, newY:Number, newScale:int ):void {
+
+    // Ignore clicks which were generated before previous rebuild finished
+    var thisDate:Date = new Date();
+    if ( thisDate.valueOf() - prevDate.valueOf() < MILLIS_BETWEEN_CLICKS )
+        return;
+
+    // Ask AS to redraw after we have finished
+    e.updateAfterEvent();
+
+    // Use new parameters
+    ox = newX;
+    oy = newY;
+    scale = newScale;
+
+    // Ask for rebuild given new parameters
+    rebuild();
+}
+
+// Fire off request to rebuild image -
+// Has to be asynchronous so that 'Recalculating' message can be displayed first
+private function rebuild():void {
+
+    // Let user know what is happening
+    info.title = "Recalculating...";
+
+    // Fire off request
+    var timer:Timer = new Timer(1,1);
+    timer.addEventListener("timer", rebuildCore);
+    timer.start();
+}
+
+// Rebuild image
+private function rebuildCore( e:TimerEvent ):void {
+
+    // Ask AS to redraw after we have finished
+    e.updateAfterEvent();
+
+    // Loop through points on screen mapping them to points on plane
+    for ( var py:int = 0; py < canvas.height; py++ ) { 
+        var y0:Number = ( py / canvas.height ) * 2 / scale + oy;
+        for ( var px:int = 0; px < canvas.width; px++ ) { 
+            var x0:Number = ( px / canvas.width ) * 2.70 / scale + ox;
+
+            // By default, point is black
+            var colour:int = 0;
+
+            // Optimization - check if point is worth testing
+            if ( needTest( x0, y0 ) ) {
+
+                // Mandelbrot calculation
+                var x:Number = 0.0;
+                var y:Number = 0.0;
+                var iteration:int = 0;
+                while ( x * x + y * y < 2 * 2 && iteration < iterationLimit ) {
+                    var xtemp:Number = x * x - y * y + x0;
+                    y = 2 * x * y + y0;
+                    x = xtemp;
+                    iteration = iteration + 1;
+                }
+
+                // Map iteration count to colour
+                if( iteration < iterationLimit ) {
+                    colour = colours[iteration];
+                }
+            }
+
+            // Set point on screen
+            bitmapData.setPixel( px, py, colour );
+        }
+    }
+
+    // Update info
+    info.title = "Scale = " + scale + ",  x(Re) = " + ox + ",  y(Im) =" + oy;
+
+    // Save time at which redrawing was complete
+    prevDate = new Date();
+}
+
+// Optimization - Check if point is worth testing
+private function needTest( x0:Number, y0:Number ):Boolean {
+
+   if ( x0 < -1.25 ) return true; // Past left edge of small blob
+   if ( x0 > 0.375 ) return true; // Past right edge of large blob
+   if ( y0 < -0.65 ) return true; // Past bottom edge of large blob
+   if ( y0 > 0.65 ) return true;  // Past top edge of large blob
+   if ( x0 >= -0.75 ) {           // Possibly in large blob
+      var q:Number = ( x0 - 0.25 ) * ( x0 - 0.25 ) + y0 * y0;
+      if ( 4 * q * ( q + ( x0 - 0.25 ) ) < y0 * y0 ) return false; // In large blob
+   }
+   if ( y0 < -0.25 ) return true; // Past bottom edge of small blob
+   if ( y0 > 0.25 ) return true;  // Past top edge of small blob
+   if ( 16 * ( ( x0 + 1 ) * ( x0 + 1 ) + y0 * y0 ) < 1 ) return false; // In small blob
+
+   return true; // Don't know if point is in set or not , so need to test
+}
+
+// When user clicks on image, recenter, rescale and rebuild
+private function zoomIn( e:MouseEvent ):void {
+
+    // Recenter, rescale and rebuild
+    var newX:Number = ( e.localX / canvas.width ) * 2.70 / scale + ox - 2.70 / scale / 4;
+    var newY:Number = ( e.localY / canvas.height ) * 2 / scale + oy - 2 / scale / 4;
+    var newScale:int = scale * 2;
+    requestRebuild( e, newX, newY, newScale );
+}
+
+// When user clicks on zoom out button, recenter, rescale and rebuild
+private function zoomOut( e:MouseEvent ):void {
+
+    // Recenter, rescale and rebuild
+    if ( scale < 4 ) {
+        requestRebuild( e, START_OX, START_OY, START_SCALE );
+    } else {
+        var newX:Number = ox - ( ox - START_OX ) / scale;
+        var newY:Number = oy - ( oy - START_OY ) / scale;
+        var newScale:int = scale / 2;
+        requestRebuild( e, newX, newY, newScale );
+    }
+}
+
+]]>
+     </fx:Script>
+
+     <s:Panel id="panel" title="Simple Mandelbrot Explorer v1.0 by Jon Nixon" width="100%" height="95%">
+         <s:VGroup left="10" right="10" top="10" bottom="10">
+             <s:HGroup width="100%">
+                 <s:Label text="Iterations:" height="100%" verticalAlign="middle"/>
+                 <s:TextInput id="iterationsField" widthInChars="4"
+                     restrict="0123456789" enter="restart();"
+                     toolTip="Set iterations from 25 (fast) to 2000 (detailed) and press Return. 300 is a good compromise"/>
+                 <s:Button label="Restart" click="restart();"/>
+                 <s:Label text="Click on Image to Zoom In" width="100%" height="100%" textAlign="center" verticalAlign="middle"/>
+                 <s:Button label="Zoom Out" click="zoomOut( event );"/>
+             </s:HGroup>
+             <s:Panel id="info" title="" width="100%" height="100%" left="10" dropShadowVisible="false">
+                 <mx:UIComponent id="canvas" width="100%" height="100%"
+                     creationComplete="start();" click="zoomIn( event );"/>
+             </s:Panel>
+         </s:VGroup>
+     </s:Panel>
+
+</s:Application>
